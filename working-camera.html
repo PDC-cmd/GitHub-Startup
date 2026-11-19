@@ -1,0 +1,576 @@
+<title>Working Camera</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a camera back. Viewfinder on the left with an LCD readout strip under it, the assignment brief and three dials on the right. One committed dark look, like a camera body. */
+:root{
+  color-scheme:dark;
+  --body:#1f252b;      /* camera body, blue-biased charcoal */
+  --panel:#283038;
+  --well:#161b20;      /* recessed LCD */
+  --line:#3a454f;
+  --ink:#ece8df;
+  --muted:#9ca7b1;
+  --lcd:#ffb547;       /* amber readout */
+  --good:#62cfa9;
+  --bad:#f08080;
+  --gridc:rgba(255,255,255,.55);
+  --display:"Bricolage Grotesque","Trebuchet MS",sans-serif;
+  --text:"Instrument Sans",system-ui,sans-serif;
+  --mono:"DM Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--body);color:var(--ink);font:16px/1.5 var(--text);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+.app{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:24px}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--lcd);outline-offset:3px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.1}
+p{margin:0}
+
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-block:18px;border-bottom:1px solid var(--line)}
+.brand{background:none;border:0;padding:0;font:800 20px/1 var(--display);letter-spacing:-.01em}
+.brand span{color:var(--lcd)}
+.total{font:500 14px var(--mono);color:var(--lcd);font-variant-numeric:tabular-nums}
+
+/* home */
+.intro{display:flex;flex-direction:column;gap:10px;max-width:38em}
+.intro h1{font-size:clamp(32px,6vw,52px);font-weight:800;letter-spacing:-.02em}
+.intro p{color:var(--muted);font-size:17px}
+.paths{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.path{background:var(--panel);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.path canvas{display:block;width:100%;height:auto;aspect-ratio:3/2}
+.path .pbody{padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px}
+.path h2{font-size:22px}
+.path .blurb{color:var(--muted);font-size:14px}
+.shots{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.shots button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--well);border:1px solid transparent;border-radius:6px;padding:8px 10px;text-align:left;font-size:14px}
+.shots button:hover{border-color:var(--lcd)}
+.stars{font-size:14px;letter-spacing:2px;color:var(--line);white-space:nowrap}
+.stars b{color:var(--lcd);font-weight:400}
+
+/* shoot */
+.crumbs{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+.link{background:none;border:0;padding:0;color:var(--lcd);font-weight:500}
+.stage{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:820px){.stage{grid-template-columns:minmax(0,1fr)}}
+.cam{display:flex;flex-direction:column;gap:10px;min-width:0}
+.vf{position:relative;border-radius:8px;overflow:hidden;background:#000;aspect-ratio:3/2;max-width:100%;cursor:grab;touch-action:none}
+.vf.frozen{cursor:default}
+.vf canvas{display:block;width:100%;height:100%}
+.grid{position:absolute;inset:0;pointer-events:none;background:
+  linear-gradient(to right,transparent calc(33.33% - .5px),var(--gridc) calc(33.33% - .5px),var(--gridc) calc(33.33% + .5px),transparent calc(33.33% + .5px),transparent calc(66.66% - .5px),var(--gridc) calc(66.66% - .5px),var(--gridc) calc(66.66% + .5px),transparent calc(66.66% + .5px)),
+  linear-gradient(to bottom,transparent calc(33.33% - .5px),var(--gridc) calc(33.33% - .5px),var(--gridc) calc(33.33% + .5px),transparent calc(33.33% + .5px),transparent calc(66.66% - .5px),var(--gridc) calc(66.66% - .5px),var(--gridc) calc(66.66% + .5px),transparent calc(66.66% + .5px))}
+.badge,.hint{position:absolute;font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;background:rgba(0,0,0,.55);color:#fff;padding:4px 8px;border-radius:4px;pointer-events:none}
+.badge{top:10px;left:10px}
+.hint{bottom:10px;left:50%;transform:translateX(-50%);transition:opacity .4s}
+.flash{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none}
+.flash.go{animation:blink .22s}
+@keyframes blink{0%{opacity:0}30%{opacity:1}100%{opacity:0}}
+
+.readout{background:var(--well);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:repeat(3,auto) minmax(140px,1fr);gap:8px 22px;align-items:center}
+@media (max-width:520px){.readout{grid-template-columns:repeat(3,1fr)}.meter{grid-column:1/-1}}
+.ro small{display:block;font:500 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.ro b{font:500 20px var(--mono);color:var(--lcd);font-variant-numeric:tabular-nums;white-space:nowrap}
+.meter{display:flex;flex-direction:column;gap:4px;min-width:0}
+.scale{position:relative;height:14px;border-radius:3px;
+  background:linear-gradient(to right,transparent 37.5%,rgba(98,207,169,.3) 37.5%,rgba(98,207,169,.3) 62.5%,transparent 62.5%),
+  repeating-linear-gradient(to right,var(--line) 0,var(--line) 1px,transparent 1px,transparent calc(100%/6))}
+.scale{border-right:1px solid var(--line)}
+.scale i{position:absolute;top:-3px;bottom:-3px;width:4px;margin-left:-2px;border-radius:2px;background:var(--lcd);transition:left .12s}
+.mrow{display:flex;justify-content:space-between;font:400 11px var(--mono);color:var(--muted)}
+.mtext{font:500 12px var(--mono);letter-spacing:.04em}
+.mtext.ok{color:var(--good)}.mtext.off{color:var(--bad)}
+
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.brief{display:flex;flex-direction:column;gap:10px}
+.brief h2{font-size:28px;font-weight:800}
+.brief .lesson{color:var(--ink)}
+.eyebrow{font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.goals{margin:0;padding-left:18px;color:var(--muted);font-size:15px}
+.dials{display:flex;flex-direction:column;gap:14px;background:var(--panel);border-radius:10px;padding:16px}
+.dial{display:flex;flex-direction:column;gap:4px}
+.dial .dh{display:flex;justify-content:space-between;align-items:baseline}
+.dial label{font-weight:600}
+.dial output{font:500 15px var(--mono);color:var(--lcd)}
+.dial input{width:100%;accent-color:var(--lcd);margin:0}
+.dial .ends{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
+.check{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--muted)}
+.check input{accent-color:var(--lcd)}
+.shutter{border:0;border-radius:999px;padding:14px 20px;background:var(--lcd);color:#221603;font:800 18px var(--display);display:flex;align-items:center;justify-content:center;gap:10px}
+.shutter::before{content:"";width:16px;height:16px;border-radius:50%;border:3px solid currentColor}
+.shutter:active{transform:translateY(1px)}
+
+.result{display:flex;flex-direction:column;gap:14px;background:var(--panel);border-radius:10px;padding:16px}
+.result .big{font-size:30px;letter-spacing:6px;color:var(--line);line-height:1}
+.result .big b{color:var(--lcd);font-weight:400}
+.result h3{font-size:22px}
+.rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.rows li{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px}
+.rows .mark{font:500 15px var(--mono);line-height:1.5}
+.rows .y .mark{color:var(--good)}.rows .n .mark{color:var(--bad)}
+.rows strong{display:block;font-weight:600}
+.rows span.tip{color:var(--muted);font-size:14px}
+.used{font:400 13px var(--mono);color:var(--muted)}
+.btns{display:flex;gap:10px;flex-wrap:wrap}
+.btn{flex:1 1 auto;border-radius:999px;padding:10px 16px;border:1px solid var(--line);background:none;font-weight:600}
+.btn.primary{background:var(--lcd);border-color:var(--lcd);color:#221603}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* mascot, rank, locks, album */
+.brand{display:flex;align-items:center;gap:8px}
+.logo{width:32px;height:28px;flex:none}
+.rank{display:flex;align-items:center;gap:16px;background:var(--panel);border-radius:10px;padding:14px 16px;max-width:38em}
+.mascot{width:84px;height:74px;flex:none}
+.rinfo{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.rinfo strong{font:800 22px/1.1 var(--display)}
+.bar{height:8px;border-radius:4px;background:var(--well);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--lcd);border-radius:4px;transition:width .4s}
+.rnext{font-size:13px;color:var(--muted)}
+.shots button:disabled{opacity:.5;cursor:not-allowed;border-color:transparent}
+.lock{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.coach{display:flex;align-items:center;gap:10px}
+.albumWrap{display:flex;flex-direction:column;gap:12px}
+.albumWrap h2{font-size:22px}
+.album{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.album figure{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+.album img{display:block;width:100%;aspect-ratio:3/2;border-radius:6px;border:4px solid var(--ink)}
+.album figcaption{display:flex;justify-content:space-between;gap:6px;font-size:13px;color:var(--muted)}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="snap" viewBox="0 0 64 56">
+  <rect x="14" y="46" width="9" height="8" rx="4" fill="#d98a1f"/><rect x="41" y="46" width="9" height="8" rx="4" fill="#d98a1f"/>
+  <rect x="17" y="3" width="17" height="12" rx="3" fill="#d98a1f"/><rect x="44" y="6" width="10" height="7" rx="2.5" fill="#f08080"/>
+  <rect x="4" y="11" width="56" height="37" rx="9" fill="#ffb547"/>
+  <circle cx="30" cy="29" r="14.5" fill="#161b20"/><circle cx="30" cy="29" r="9.5" fill="#2f5a6c"/><circle cx="30" cy="29" r="4.8" fill="#0c1014"/><circle cx="34.5" cy="24.5" r="2.8" fill="#fff"/>
+  <circle cx="51" cy="22" r="2.2" fill="#221603"/>
+  <path d="M47 35q4 4.5 8 0" stroke="#221603" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+</symbol></svg>
+
+<div class="app">
+  <header class="top">
+    <button class="brand" id="homeBtn" aria-label="Working Camera home"><svg class="logo"><use href="#snap"/></svg>Working <span>Camera</span></button>
+    <div class="total" id="total"></div>
+  </header>
+
+  <main id="home">
+    <div class="app" style="gap:24px">
+      <div class="intro">
+        <h1>Learn photography by taking the shot.</h1>
+        <p>Pick a style. Each one gives you three assignments. Set the camera, frame the picture, press the shutter, and see what your settings did.</p>
+      </div>
+      <div class="rank">
+        <svg class="mascot" role="img" aria-label="Snap, the camera mascot"><use href="#snap"/></svg>
+        <div class="rinfo"><span class="eyebrow">Your rank</span><strong id="rankName"></strong><div class="bar"><i id="rankBar"></i></div><span class="rnext" id="rankNext"></span></div>
+      </div>
+      <div class="paths" id="paths"></div>
+      <section class="albumWrap" id="albumWrap" hidden><h2>Your album</h2><div class="album" id="album"></div></section>
+    </div>
+  </main>
+
+  <main id="shoot" hidden>
+    <div class="app" style="gap:16px">
+      <div class="crumbs"><button class="link" id="back">&larr; All paths</button><span id="crumb"></span></div>
+      <div class="stage">
+        <div class="cam">
+          <div class="vf" id="vf" tabindex="0" aria-label="Viewfinder. Drag, or use the arrow keys, to reframe the picture.">
+            <canvas id="view" width="1080" height="720"></canvas>
+            <div class="grid" id="grid"></div>
+            <span class="badge" id="badge"></span>
+            <span class="hint" id="hint">Drag to reframe</span>
+            <div class="flash" id="flash"></div>
+          </div>
+          <div class="readout">
+            <div class="ro"><small>Aperture</small><b id="rA"></b></div>
+            <div class="ro"><small>Shutter</small><b id="rT"></b></div>
+            <div class="ro"><small>ISO</small><b id="rI"></b></div>
+            <div class="meter" aria-live="polite">
+              <div class="scale"><i id="needle"></i></div>
+              <div class="mrow"><span>&minus;3</span><span>0</span><span>+3</span></div>
+              <div class="mtext" id="mtext"></div>
+            </div>
+          </div>
+        </div>
+        <aside class="side">
+          <div class="brief">
+            <span class="eyebrow" id="eyebrow"></span>
+            <h2 id="title"></h2>
+            <p class="lesson" id="lesson"></p>
+            <span class="eyebrow">For three stars</span>
+            <ul class="goals" id="goals"></ul>
+          </div>
+          <div id="controls" style="display:flex;flex-direction:column;gap:14px">
+            <div class="dials">
+              <div class="dial">
+                <div class="dh"><label for="dA">Aperture</label><output id="oA"></output></div>
+                <input type="range" id="dA" min="0" max="6" step="1">
+                <div class="ends"><span>Blurry background, more light</span><span>Everything sharp, less light</span></div>
+              </div>
+              <div class="dial">
+                <div class="dh"><label for="dT">Shutter speed</label><output id="oT"></output></div>
+                <input type="range" id="dT" min="0" max="17" step="1">
+                <div class="ends"><span>Slow: blurs motion, more light</span><span>Fast: freezes motion, less light</span></div>
+              </div>
+              <div class="dial">
+                <div class="dh"><label for="dI">ISO</label><output id="oI"></output></div>
+                <input type="range" id="dI" min="0" max="6" step="1">
+                <div class="ends"><span>Clean picture</span><span>Brighter, but grainy</span></div>
+              </div>
+              <label class="check"><input type="checkbox" id="gridOn" checked> Show the rule-of-thirds grid</label>
+            </div>
+            <button class="shutter" id="fire">Take the photo</button>
+          </div>
+          <div class="result" id="result" hidden></div>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const VW=720,VH=480,WW=1000,WH=620,S=1.5,W=VW*S,H=VH*S;
+const AP=[1.8,2.8,4,5.6,8,11,16];
+const SH=[30,15,8,4,2,1,1/2,1/4,1/8,1/15,1/30,1/60,1/125,1/250,1/500,1/1000,1/2000,1/4000];
+const ISO=[100,200,400,800,1600,3200,6400];
+const shL=t=>t>=1?t+' s':'1/'+Math.round(1/t)+' s';
+
+/* ---------- drawing helpers ---------- */
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function lg(g,x0,y0,x1,y1,st){const q=g.createLinearGradient(x0,y0,x1,y1);st.forEach(s=>q.addColorStop(s[0],s[1]));return q}
+function poly(g,pts,c){g.fillStyle=c;g.beginPath();pts.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]));g.fill()}
+function dot(g,x,y,r,c){g.fillStyle=c;g.beginPath();g.arc(x,y,r,0,7);g.fill()}
+function ell(g,x,y,rx,ry,c){g.fillStyle=c;g.beginPath();g.ellipse(x,y,rx,ry,0,0,7);g.fill()}
+
+function runner(g,x,gy,ph,col){
+  const hip=[x,gy-96],sh=[x+14,gy-166];
+  g.lineCap='round';g.lineJoin='round';
+  const leg=(p,c)=>{const a=Math.sin(p)*.9,k=[hip[0]+Math.sin(a)*48,hip[1]+Math.cos(a)*48],b=a-1.0*Math.max(0,Math.cos(p))-.15,f=[k[0]+Math.sin(b)*48,k[1]+Math.cos(b)*48];
+    g.strokeStyle=c;g.lineWidth=17;g.beginPath();g.moveTo(hip[0],hip[1]);g.lineTo(k[0],k[1]);g.lineTo(f[0],f[1]);g.stroke()};
+  const arm=(p,c)=>{const a=Math.sin(p),e=[sh[0]+Math.sin(a)*34,sh[1]+Math.cos(a)*34],b=a+1.3,h=[e[0]+Math.sin(b)*30,e[1]+Math.cos(b)*30];
+    g.strokeStyle=c;g.lineWidth=12;g.beginPath();g.moveTo(sh[0],sh[1]);g.lineTo(e[0],e[1]);g.lineTo(h[0],h[1]);g.stroke()};
+  leg(ph+Math.PI,col.far);arm(ph,col.far);
+  g.strokeStyle=col.top;g.lineWidth=30;g.beginPath();g.moveTo(hip[0],hip[1]-6);g.lineTo(sh[0],sh[1]);g.stroke();
+  g.strokeStyle=col.shorts;g.lineWidth=30;g.beginPath();g.moveTo(hip[0],hip[1]);g.lineTo(hip[0]+2,hip[1]-14);g.stroke();
+  leg(ph,col.skin);arm(ph+Math.PI,col.skin);
+  dot(g,sh[0]+12,sh[1]-40,19,col.skin);
+}
+const runX=time=>((time*220)%1300)-150;
+
+/* ---------- scenes (world is 1000 x 620, drawn as if perfectly exposed) ---------- */
+const SCENES={
+  park:{dof:1.25,subject:()=>({x:500,y:290}),
+    bg(g,o){const d=o.shot.dusk;
+      g.fillStyle=lg(g,0,0,0,380,d?[[0,'#2b2a55'],[.6,'#b2587a'],[1,'#f2a25c']]:[[0,'#86c1ec'],[1,'#e2f2f4']]);g.fillRect(0,0,WW,WH);
+      const r=rng(7);
+      for(let i=0;i<28;i++){const x=i*40+r()*30-30,y=290+r()*50,rad=60+r()*50;
+        dot(g,x,y,rad,d?`hsl(${150+r()*20} 25% ${11+r()*8}%)`:`hsl(${95+r()*40} ${35+r()*20}% ${30+r()*18}%)`)}
+      g.fillStyle=d?'#1d2b2a':'#7fb069';g.fillRect(0,370,WW,WH-370);
+      poly(g,[[400,370],[470,370],[900,620],[260,620]],d?'#3a3540':'#d9c7a3');
+      for(let i=0;i<60;i++){const x=r()*WW,y=380+r()*230;dot(g,x,y,3+r()*3,d?'#3c4a44':['#f6e27a','#f4f1ea','#f2a0b8'][i%3])}
+      g.strokeStyle=d?'#14171c':'#5a4a3a';g.lineWidth=6;[120,880].forEach(x=>{g.beginPath();g.moveTo(x,400);g.lineTo(x,150);g.stroke()});
+      for(let i=0;i<15;i++){const x=120+i*54.3,y=165+Math.sin(i/14*Math.PI)*46;
+        if(d){dot(g,x,y,16,'rgba(255,200,110,.35)')}dot(g,x,y,d?8:6,d?'#ffe2a0':'#fff6c9')}
+    },
+    fg(g,o){const cx=500,cy=290,d=o.shot.dusk;
+      g.fillStyle=d?'#8d3b2c':'#c8553d';g.beginPath();g.moveTo(cx-200,WH);g.quadraticCurveTo(cx-190,cy+125,cx-60,cy+98);g.lineTo(cx+60,cy+98);g.quadraticCurveTo(cx+190,cy+125,cx+200,WH);g.fill();
+      g.fillStyle=d?'#9a6349':'#b9785a';g.fillRect(cx-26,cy+50,52,62);
+      ell(g,cx,cy-8,78,90,'#2a1d1a');
+      ell(g,cx,cy+4,62,74,d?'#b98060':'#d39672');
+      g.fillStyle='#2a1d1a';g.beginPath();g.ellipse(cx,cy-46,64,36,0,Math.PI,2*Math.PI);g.fill();
+      dot(g,cx-24,cy,6,'#231815');dot(g,cx+24,cy,6,'#231815');
+      g.strokeStyle='#7a3b2e';g.lineWidth=4;g.lineCap='round';g.beginPath();g.arc(cx,cy+22,20,.15*Math.PI,.85*Math.PI);g.stroke();
+    }},
+  lake:{dof:.9,horizon:315,
+    bg(g){
+      g.fillStyle=lg(g,0,0,0,315,[[0,'#4f86c6'],[.7,'#f3c69a'],[1,'#fde3b8']]);g.fillRect(0,0,WW,315);
+      dot(g,690,262,60,'rgba(255,240,200,.35)');dot(g,690,262,34,'#fff5cf');
+      poly(g,[[0,315],[0,210],[130,130],[250,220],[360,110],[520,250],[640,170],[790,260],[900,160],[1000,230],[1000,315]],'#8794b8');
+      poly(g,[[360,110],[400,160],[375,165],[350,150],[330,160]],'#eef1f7');poly(g,[[130,130],[160,165],[130,160],[105,170]],'#eef1f7');
+      poly(g,[[0,315],[0,260],[180,215],[330,285],[480,230],[700,300],[860,240],[1000,290],[1000,315]],'#4f6485');
+      const r=rng(3);for(let x=0;x<WW;x+=14){const h=14+r()*16;poly(g,[[x,316],[x+7,316-h],[x+14,316]],'#1f3b34')}
+      g.fillStyle=lg(g,0,315,0,WH,[[0,'#8db7d3'],[1,'#274f78']]);g.fillRect(0,315,WW,WH-315);
+      for(let i=0;i<16;i++){const y=326+i*17,w=70-i*3+r()*20;g.fillStyle=`rgba(255,240,200,${.5-i*.025})`;g.fillRect(690-w/2,y,w,4)}
+      for(let i=0;i<50;i++){g.fillStyle='rgba(255,255,255,.14)';g.fillRect(r()*WW,330+r()*240,30+r()*60,2)}
+    },
+    fg(g){const r=rng(11);
+      g.fillStyle='#22352a';g.beginPath();g.moveTo(0,WH);g.lineTo(0,575);g.quadraticCurveTo(250,535,520,585);g.quadraticCurveTo(780,620,1000,560);g.lineTo(1000,WH);g.fill();
+      ell(g,150,592,120,34,'#56606c');ell(g,120,584,80,22,'#6d7885');ell(g,840,600,150,34,'#4b5560');ell(g,880,590,80,20,'#66717d');
+      for(let i=0;i<46;i++){const x=r()*WW,h=24+r()*50,y=WH-r()*10;g.strokeStyle='#3d6b3f';g.lineWidth=2.5;g.beginPath();g.moveTo(x,y);g.lineTo(x+4,y-h);g.stroke();dot(g,x+4,y-h,5+r()*3,['#f2c14e','#e86a92','#f4f1ea'][i%3])}
+    }},
+  falls:{dof:.6,
+    bg(g){
+      g.fillStyle=lg(g,0,0,0,WH,[[0,'#27412f'],[1,'#12231c']]);g.fillRect(0,0,WW,WH);
+      const r=rng(21);for(let i=0;i<40;i++)dot(g,r()*WW,r()*230,40+r()*60,`hsl(${120+r()*30} ${25+r()*15}% ${14+r()*12}%)`);
+      poly(g,[[0,620],[0,120],[140,90],[300,150],[420,60],[440,520],[380,620]],'#3b4046');
+      poly(g,[[1000,620],[1000,100],[820,80],[690,140],[575,60],[560,520],[640,620]],'#33383e');
+      poly(g,[[0,620],[0,300],[160,330],[290,460],[330,620]],'#4a5057');poly(g,[[1000,620],[1000,330],[840,350],[720,470],[690,620]],'#434950');
+      for(let i=0;i<24;i++){const x=r()*380,y=130+r()*380;ell(g,i%2?x:1000-x,y,26+r()*30,9,'rgba(90,130,80,.5)')}
+      g.fillStyle=lg(g,0,500,0,WH,[[0,'#6f9aa3'],[1,'#254a55']]);g.fillRect(300,500,400,120);
+    },
+    fg(g,o){const r=rng(5),L=o.final?Math.min(440,Math.max(4,700*o.t)):12;
+      g.fillStyle='rgba(235,245,250,.35)';g.fillRect(430,58,140,450);
+      g.lineCap='round';g.lineWidth=3;g.strokeStyle=`rgba(255,255,255,${Math.max(.22,Math.min(.9,14/L))})`;
+      for(let i=0;i<190;i++){const x=434+r()*132,p=(r()+o.time*(.9+r()*.5))%1,y=60+p*440;g.beginPath();g.moveTo(x,Math.max(60,y-L));g.lineTo(x,y);g.stroke()}
+      if(o.final&&o.t>=.5){g.fillStyle=lg(g,430,0,570,0,[[0,'rgba(255,255,255,.55)'],[.5,'rgba(255,255,255,.9)'],[1,'rgba(255,255,255,.55)']]);g.fillRect(430,58,140,450);
+        const q=g.createRadialGradient(500,515,10,500,515,190);q.addColorStop(0,'rgba(255,255,255,.75)');q.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=q;g.fillRect(300,400,400,220)}
+      else for(let i=0;i<40;i++)dot(g,410+r()*180,480+r()*50-Math.abs(Math.sin(o.time*6+i))*18,2+r()*2.5,'rgba(255,255,255,.85)');
+    }},
+  track:{dof:1,subject:o=>({x:runX(o.time)+10,y:420}),
+    bg(g){
+      g.fillStyle=lg(g,0,0,0,260,[[0,'#7fbdea'],[1,'#d9eef6']]);g.fillRect(0,0,WW,300);
+      const r=rng(9);for(let i=0;i<22;i++)dot(g,i*50+r()*20,235+r()*20,44+r()*26,`hsl(${105+r()*30} 38% ${30+r()*12}%)`);
+      g.fillStyle='#8f98a3';g.fillRect(0,270,WW,110);
+      for(let i=0;i<420;i++)dot(g,r()*WW,280+Math.floor(r()*5)*20,5,`hsl(${r()*360} 55% ${50+r()*20}%)`);
+      g.fillStyle='#e9ecef';g.fillRect(0,376,WW,10);
+      g.fillStyle='#c4573a';g.fillRect(0,386,WW,WH-386);
+      g.fillStyle='rgba(255,255,255,.85)';[420,470,535,605].forEach(y=>g.fillRect(0,y,WW,4));
+    },
+    fg(g,o){runner(g,runX(o.time),528,o.time*11,{skin:'#8a5a3c',far:'#6d452d',top:'#f4d03f',shorts:'#1f2d50'});return o.final?Math.min(400,2000*o.t):0}},
+  gym:{dof:1,subject:o=>({x:runX(o.time)+10,y:420}),
+    bg(g){
+      g.fillStyle=lg(g,0,0,0,400,[[0,'#3f3731'],[1,'#2a2420']]);g.fillRect(0,0,WW,400);
+      for(let i=0;i<5;i++){g.fillStyle='#7f8ea0';g.fillRect(60+i*200,50,110,70)}
+      for(let i=0;i<5;i++){g.fillStyle=i%2?'#5b3f2e':'#6a4a36';g.fillRect(0,290+i*22,WW,22)}
+      g.fillStyle=lg(g,0,400,0,WH,[[0,'#8a5c33'],[1,'#a8743f']]);g.fillRect(0,400,WW,220);
+      g.strokeStyle='rgba(255,255,255,.7)';g.lineWidth=4;g.beginPath();g.moveTo(0,450);g.lineTo(WW,450);g.moveTo(0,600);g.lineTo(WW,600);g.stroke();
+      g.beginPath();g.ellipse(500,525,150,60,0,0,7);g.stroke();
+      g.fillStyle='#e9ecef';g.fillRect(830,160,110,74);g.strokeStyle='#e8642c';g.lineWidth=5;g.strokeRect(864,190,42,30);g.beginPath();g.ellipse(885,240,26,7,0,0,7);g.stroke();
+      g.fillStyle='#555';g.fillRect(880,234,10,170);
+    },
+    fg(g,o){const x=runX(o.time),ph=o.time*11;runner(g,x,528,ph,{skin:'#c98d68',far:'#a06e4f',top:'#d94f4f',shorts:'#f1f1f1'});
+      dot(g,x+62,508-Math.abs(Math.sin(ph))*84,17,'#e8642c');return o.final?Math.min(400,2000*o.t):0}},
+  city:{dof:.25,
+    bg(g,o){const road=o.shot.road;
+      g.fillStyle=lg(g,0,0,0,440,[[0,'#0b1030'],[1,'#3a2a5c']]);g.fillRect(0,0,WW,WH);
+      dot(g,820,90,36,'rgba(240,235,210,.18)');dot(g,820,90,24,'#f1ecd6');
+      const r=rng(31);
+      for(let k=0;k<2;k++){let x=-10;while(x<WW){const w=40+r()*50,h=(k?110:190)+r()*(k?150:120),y=440-h;
+        g.fillStyle=k?'#141a33':'#1e2545';g.fillRect(x,y,w,h);
+        for(let wy=y+10;wy<430;wy+=14)for(let wx=x+6;wx<x+w-8;wx+=11)if(r()<.42){g.fillStyle=r()<.8?'#ffd98a':'#bfe3ff';g.fillRect(wx,wy,5,7)}
+        x+=w+(k?8:3)}}
+      if(road){g.fillStyle='#1a1c25';g.fillRect(0,440,WW,180);g.fillStyle='#2a2d3a';g.fillRect(0,440,WW,36);
+        g.fillStyle='rgba(255,255,255,.35)';for(let x=0;x<WW;x+=90)g.fillRect(x,541,44,4);
+        for(let x=40;x<WW;x+=160){g.fillStyle='#3a3d4a';g.fillRect(x,380,4,70);dot(g,x+2,378,14,'rgba(255,214,140,.3)');dot(g,x+2,378,5,'#ffe2a0')}}
+      else{g.fillStyle=lg(g,0,440,0,WH,[[0,'#1a2148'],[1,'#080b1c']]);g.fillRect(0,440,WW,180);
+        for(let i=0;i<120;i++){g.fillStyle=`rgba(255,${190+r()*50|0},${120+r()*100|0},${.15+r()*.35})`;g.fillRect(r()*WW,446+r()*150,3+r()*4,10+r()*34)}}
+    },
+    fg(g,o){if(!o.shot.road)return 0;const r=rng(17);
+      [[512,'#ff5a4d',-1],[578,'#fff1c9',1]].forEach(([y,c,dir])=>{for(let i=0;i<4;i++){
+        let x=((i*350+r()*120+dir*o.time*300)%1400+1400)%1400-200;const len=o.final?Math.min(1500,300*o.t):0;
+        if(len<60){g.fillStyle='#0e1017';g.fillRect(x-(dir>0?70:0),y-16,70,22);}
+        g.save();g.shadowColor=c;g.shadowBlur=14;g.strokeStyle=c;g.lineCap='round';g.lineWidth=5;
+        [0,8].forEach(dy=>{g.beginPath();g.moveTo(x,y+dy);g.lineTo(x-dir*Math.max(2,len),y+dy);g.stroke()});g.restore()}});
+      return 0}},
+  stars:{dof:0,
+    bg(g,o){
+      g.fillStyle=lg(g,0,0,0,WH,[[0,'#050818'],[.75,'#1a2450'],[1,'#2a3466']]);g.fillRect(0,0,WW,WH);
+      g.save();g.translate(520,230);g.rotate(-.55);
+      for(let i=0;i<5;i++){const q=g.createRadialGradient(0,0,0,0,0,300);q.addColorStop(0,'rgba(190,200,255,.16)');q.addColorStop(1,'rgba(190,200,255,0)');g.fillStyle=q;g.save();g.scale(2.2,.32+i*.08);g.beginPath();g.arc((i-2)*30,0,300,0,7);g.fill();g.restore()}
+      g.restore();
+      const r=rng(41),trail=o.final&&o.t>20?(o.t-14)*.75:0;g.lineCap='round';
+      for(let i=0;i<420;i++){const x=r()*WW,y=r()*500,s=.5+r()*r()*2.2,a=.45+r()*.55,c=`rgba(${220+r()*35|0},${225+r()*30|0},255,${a})`;
+        if(trail){g.strokeStyle=c;g.lineWidth=s*1.6;g.beginPath();g.moveTo(x,y);g.lineTo(x+trail,y+trail*.55);g.stroke()}else dot(g,x,y,s,c)}
+    },
+    fg(g){
+      poly(g,[[0,620],[0,500],[150,455],[330,510],[520,470],[720,520],[880,465],[1000,500],[1000,620]],'#070a14');
+      const q=g.createRadialGradient(320,560,5,320,560,120);q.addColorStop(0,'rgba(255,170,70,.45)');q.addColorStop(1,'rgba(255,170,70,0)');g.fillStyle=q;g.fillRect(180,430,280,190);
+      poly(g,[[270,580],[320,510],[370,580]],'#f2a03d');poly(g,[[312,580],[320,540],[328,580]],'#6a3a12');
+      const r=rng(2);for(let i=0;i<9;i++){const x=600+r()*380,h=40+r()*50;poly(g,[[x-14,520],[x,520-h],[x+14,520]],'#05070f')}
+    }}
+};
+
+/* ---------- what the editor checks ---------- */
+const near=(v,a,tol)=>Math.abs(v-a)<=tol;
+const C={
+  expo:{label:'Good exposure',test:c=>Math.abs(c.stops)<=.75,ok:'Bright enough to see detail, with nothing washed out.',
+    no:c=>{const n=Math.min(9,Math.abs(c.stops)).toFixed(0)||1,pl=n==='1'?'stop':'stops';return c.stops>0?`About ${n} ${pl} too bright. Use a faster shutter, a higher f-number, or a lower ISO.`:`About ${n} ${pl} too dark. Use a slower shutter, a lower f-number, or a higher ISO.`}},
+  blurBg:{label:'Blurry background',test:c=>c.N<=2.8,ok:'The wide aperture gave you a shallow depth of field, so the person stands out.',no:'The background is still sharp enough to distract. Open the aperture to f/2.8 or wider.'},
+  steady:{label:'No camera shake',test:c=>c.t<=1/60,ok:'Fast enough to hold the camera by hand.',no:'Hand-held, anything slower than about 1/60 s smears the whole frame. Speed up the shutter.'},
+  deep:{label:'Sharp from front to back',test:c=>c.N>=8,ok:'A narrow aperture keeps near and far in focus.',no:'The distance has gone soft. Landscapes usually want f/8 or higher.'},
+  freeze:{label:'Motion frozen',test:c=>c.t<=1/500,ok:'A fast shutter caught the runner mid-stride.',no:'The runner is smeared. Sport needs about 1/500 s or faster.'},
+  inFrame:{label:'Runner in the frame',test:c=>c.fx>.1&&c.fx<.9,ok:'You pressed the shutter at the right moment.',no:'The runner was at the edge or out of the picture. Wait until they cross the middle.'},
+  lead:{label:'Room to run into',test:c=>c.fx>.12&&c.fx<.42,ok:'Space in front of a moving subject makes the picture feel like it is going somewhere.',no:'Catch the runner on the left third so there is empty space ahead of them.'},
+  face:{label:'Face on a thirds point',test:c=>(near(c.fx,1/3,.07)||near(c.fx,2/3,.07))&&near(c.fy,1/3,.1),ok:'Off-centre framing gives the portrait more life.',no:'Drag the picture until the face sits where two grid lines cross, near the top.'},
+  horizon:{label:'Horizon on a thirds line',test:c=>near(c.hy,1/3,.06)||near(c.hy,2/3,.06),ok:'You chose whether sky or water gets the attention.',no:'A horizon through the middle cuts the picture in half. Drag up or down until it sits on a grid line.'},
+  silky:{label:'Silky water',test:c=>c.t>=.5,ok:'The long exposure turned falling water into smooth silk.',no:'The water is frozen into drops. Hold the shutter open for half a second or longer.'},
+  trails:{label:'Long light trails',test:c=>c.t>=2,ok:'The cars drew lines of light across the whole frame.',no:'The trails are short. Keep the shutter open for 2 seconds or more.'},
+  points:{label:'Stars as sharp points',test:c=>c.t<=20,ok:'Short enough that the turning Earth did not smear the stars.',no:'The Earth turns while the shutter is open. Past about 20 seconds, stars stretch into streaks.'},
+  iso:max=>({label:max<=200?'Clean, grain-free picture':'Grain under control',test:c=>c.iso<=max,ok:'A low ISO kept the picture clean.',no:`High ISO adds grain. Keep it at ${max} or below and get the light from the other two dials.`})
+};
+
+const PATHS=[
+  {id:'portrait',name:'Portrait',blurb:'People, faces, and soft backgrounds.',demo:{a:0,t:15,i:0,time:0},shots:[
+    {id:'p1',title:'Soft background',scene:'park',ev:12,lesson:'Aperture is the opening in the lens. A small f-number such as f/1.8 is a wide opening: the person stays sharp and the background melts into blur.',checks:[C.expo,C.blurBg,C.steady]},
+    {id:'p2',title:'Off-centre',scene:'park',ev:12,lesson:'The rule of thirds: split the frame into a three-by-three grid and put what matters where the lines cross, not dead centre. Drag the picture to reframe.',checks:[C.expo,C.blurBg,C.face]},
+    {id:'p3',title:'Dusk portrait',scene:'park',dusk:true,ev:6,lesson:'When the light fades you run out of easy options. Open the aperture all the way, slow the shutter as far as your hands allow, then raise ISO only as much as you need.',checks:[C.expo,C.blurBg,C.steady,C.iso(800)]}]},
+  {id:'landscape',name:'Landscape',blurb:'Big views, sharp from the grass at your feet to the peaks.',demo:{a:4,t:13,i:0,time:0},shots:[
+    {id:'l1',title:'Front to back',scene:'lake',ev:14,tripod:true,lesson:'A high f-number such as f/8 or f/11 is a narrow opening. It keeps everything in focus, near and far, which is what a landscape wants.',checks:[C.expo,C.deep,C.iso(200)]},
+    {id:'l2',title:'Place the horizon',scene:'lake',ev:14,tripod:true,lesson:'Decide what the picture is about. Put the horizon on the lower grid line to show off the sky, or the upper one to show off the water and shore.',checks:[C.expo,C.deep,C.horizon]},
+    {id:'l3',title:'Silky waterfall',scene:'falls',ev:8,tripod:true,lesson:'With the camera on a tripod, a slow shutter lets moving water blur into silk while the rocks stay sharp. Close the aperture to stop the long exposure getting too bright.',checks:[C.expo,C.silky,C.iso(200)]}]},
+  {id:'action',name:'Action',blurb:'Fast subjects and split-second timing.',demo:{a:2,t:15,i:0,time:2.2},shots:[
+    {id:'a1',title:'Freeze the runner',scene:'track',ev:14,lesson:'Shutter speed is how long the camera looks. A fast shutter such as 1/1000 s freezes movement. Watch the runner and press when they are in the frame.',checks:[C.expo,C.freeze,C.inFrame]},
+    {id:'a2',title:'Room to run',scene:'track',ev:14,lesson:'A moving subject needs somewhere to go. Catch the runner on the left side of the frame, with open track ahead of them.',checks:[C.expo,C.freeze,C.lead]},
+    {id:'a3',title:'Indoor game',scene:'gym',ev:7,lesson:'Gyms are much darker than they look. You still need a fast shutter, so open the aperture wide and let ISO make up the rest. A little grain beats a blurry player.',checks:[C.expo,C.freeze,C.inFrame,C.iso(3200)]}]},
+  {id:'night',name:'Night',blurb:'Long exposures, city lights, and stars.',demo:{a:4,t:2,i:0,time:0},shots:[
+    {id:'n1',title:'City lights',scene:'city',ev:3,tripod:true,lesson:'On a tripod the shutter can stay open for whole seconds, so you can keep ISO low and the aperture narrow. Let time gather the light.',checks:[C.expo,C.deep,C.iso(200)]},
+    {id:'n2',title:'Light trails',scene:'city',road:true,ev:3,tripod:true,lesson:'Anything that moves while the shutter is open paints a line. Keep it open for a few seconds and passing cars turn into ribbons of light.',checks:[C.expo,C.trails,C.iso(200)]},
+    {id:'n3',title:'Starry sky',scene:'stars',ev:-7,tripod:true,lesson:'Starlight is very faint. Use your widest aperture and a high ISO, and a shutter of 10 to 20 seconds. Any longer and the stars start to streak.',checks:[C.expo,C.points,C.iso(3200)]}]}
+];
+
+/* ---------- renderer ---------- */
+const mk=()=>{const c=document.createElement('canvas');c.width=W;c.height=H;return c};
+const Bc=mk(),Lc=mk(),Ac=mk(),Tc=mk(),Fc=mk();
+const B=Bc.getContext('2d'),L=Lc.getContext('2d'),A=Ac.getContext('2d'),T=Tc.getContext('2d'),F=Fc.getContext('2d');
+const hasFilter='filter' in CanvasRenderingContext2D.prototype;
+const noise=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d'),d=g.createImageData(128,128);
+  for(let i=0;i<d.data.length;i+=4){const v=Math.random()*255|0;d.data[i]=d.data[i+1]=d.data[i+2]=v;d.data[i+3]=255}g.putImageData(d,0,0);return c})();
+
+const stopsOf=(shot,st)=>shot.ev-(Math.log2(AP[st.a]*AP[st.a]/SH[st.t])-Math.log2(ISO[st.i]/100));
+
+function blur(ctx,src,r){
+  if(hasFilter){ctx.filter=`blur(${r}px)`;ctx.drawImage(src,0,0);ctx.filter='none';return}
+  const f=1+r/1.6,w=Math.max(8,W/f|0),h=Math.max(8,H/f|0);
+  T.setTransform(1,0,0,1,0,0);T.clearRect(0,0,W,H);T.imageSmoothingEnabled=true;T.drawImage(src,0,0,w,h);
+  ctx.imageSmoothingEnabled=true;ctx.drawImage(Tc,0,0,w,h,0,0,W,H);
+}
+function smear(src,mx,my){
+  const n=Math.min(20,Math.max(2,Math.ceil(Math.hypot(mx,my)/3)));
+  A.setTransform(1,0,0,1,0,0);A.globalCompositeOperation='source-over';A.globalAlpha=1;A.clearRect(0,0,W,H);
+  A.globalCompositeOperation='lighter';A.globalAlpha=1/n;
+  for(let i=0;i<n;i++){const f=i/(n-1)-.5;A.drawImage(src,f*mx,f*my)}
+  A.globalCompositeOperation='source-over';A.globalAlpha=1;
+}
+function render(ctx,shot,st,final){
+  const sc=SCENES[shot.scene],N=AP[st.a],t=SH[st.t],iso=ISO[st.i],o={time:st.time,t,N,final,shot};
+  const prep=g=>{g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.clearRect(0,0,W,H);g.setTransform(S,0,0,S,-st.panX*S,-st.panY*S)};
+  prep(B);B.save();sc.bg(B,o);B.restore();
+  prep(L);L.save();const mv=(sc.fg(L,o)||0)*S;L.restore();
+  ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(Bc,0,0);
+  const r=Math.max(0,14/N-.9)*sc.dof*S;if(r>.4)blur(ctx,Bc,r);
+  if(final&&mv>2){smear(Lc,mv,0);ctx.drawImage(Ac,0,0)}else ctx.drawImage(Lc,0,0);
+  const s=stopsOf(shot,st);
+  if(s<0){ctx.fillStyle='#000';ctx.globalAlpha=1-Math.pow(2,s*.8)}else{ctx.fillStyle='#fff';ctx.globalAlpha=1-Math.pow(2,-s*.6)}
+  ctx.fillRect(0,0,W,H);ctx.globalAlpha=1;
+  if(final){
+    if(!shot.tripod&&t>1/60){const px=Math.min(40,400*t)*S;T.setTransform(1,0,0,1,0,0);T.clearRect(0,0,W,H);T.drawImage(ctx.canvas,0,0);smear(Tc,px,px*.4);ctx.drawImage(Ac,0,0)}
+    const amt={800:.1,1600:.2,3200:.32,6400:.48}[iso];
+    if(amt){ctx.save();ctx.globalCompositeOperation='overlay';ctx.globalAlpha=amt;ctx.imageSmoothingEnabled=false;ctx.scale(2,2);ctx.fillStyle=ctx.createPattern(noise,'repeat');ctx.fillRect(0,0,W/2,H/2);ctx.restore()}
+  }
+}
+
+/* ---------- progress ---------- */
+let best={};
+try{best=JSON.parse(localStorage.getItem('working-camera-stars')||'{}')||{}}catch(e){}
+const save=()=>{try{localStorage.setItem('working-camera-stars',JSON.stringify(best))}catch(e){}};
+const starHTML=n=>'<b>'+'★'.repeat(n)+'</b>'+'★'.repeat(3-n);
+let album={};
+try{album=JSON.parse(localStorage.getItem('working-camera-album')||'{}')||{}}catch(e){}
+const RANKS=[[0,'First Roll'],[6,'Weekend Shooter'],[14,'Sharp Eye'],[24,'Working Photographer'],[36,'Master of Light']];
+function showRank(total){
+  let k=0;RANKS.forEach((r,i)=>{if(total>=r[0])k=i});const nx=RANKS[k+1];
+  $('rankName').textContent=RANKS[k][1];$('rankBar').style.width=(total/36*100)+'%';
+  $('rankNext').textContent=nx?`${total} of 36 stars. ${nx[0]-total} more to reach ${nx[1]}.`:'All 36 stars. Snap is proud of you.';
+}
+
+/* ---------- home ---------- */
+function drawHome(){
+  const total=PATHS.reduce((s,p)=>s+p.shots.reduce((q,x)=>q+(best[x.id]||0),0),0);
+  $('total').textContent='★ '+total+' / 36';showRank(total);
+  const al=$('album');al.textContent='';let shown=0;
+  PATHS.forEach(p=>p.shots.forEach(s=>{if(!album[s.id])return;shown++;const f=document.createElement('figure'),im=new Image();im.src=album[s.id];im.alt=s.title+', your best photo';
+    const c=document.createElement('figcaption');c.innerHTML=`<span>${s.title}</span><span class="stars">${starHTML(best[s.id]||0)}</span>`;f.append(im,c);al.append(f)}));
+  $('albumWrap').hidden=!shown;
+  const wrap=$('paths');wrap.textContent='';
+  PATHS.forEach(p=>{
+    const card=document.createElement('article');card.className='path';
+    const cv=document.createElement('canvas');cv.width=480;cv.height=320;
+    render(F,p.shots[0],{...p.demo,panX:140,panY:70},false);cv.getContext('2d').drawImage(Fc,0,0,480,320);
+    const body=document.createElement('div');body.className='pbody';
+    body.innerHTML=`<h2>${p.name}</h2><p class="blurb">${p.blurb}</p>`;
+    const ul=document.createElement('ul');ul.className='shots';
+    p.shots.forEach((s,i)=>{const li=document.createElement('li'),b=document.createElement('button');
+      const locked=i>0&&(best[p.shots[i-1].id]||0)<2;b.disabled=locked;
+      b.innerHTML=`<span>${i+1}. ${s.title}</span>`+(locked?'<span class="lock">2★ on shot '+i+' to unlock</span>':`<span class="stars" aria-label="${best[s.id]||0} of 3 stars">${starHTML(best[s.id]||0)}</span>`);
+      b.onclick=()=>open(p,i);li.append(b);ul.append(li)});
+    body.append(ul);card.append(cv,body);wrap.append(card);
+  });
+}
+
+/* ---------- shooting ---------- */
+const view=$('view'),ctx=view.getContext('2d');
+let cur=null,st=null,frozen=false,raf=0,last=0;
+function open(p,i){
+  const shot=p.shots[i];cur={p,i,shot};frozen=false;
+  st={a:4,t:12,i:0,panX:140,panY:70,time:0};
+  $('home').hidden=true;$('shoot').hidden=false;$('result').hidden=true;$('controls').hidden=false;
+  $('vf').classList.remove('frozen');$('hint').style.opacity=1;
+  $('crumb').textContent=`${p.name} · Shot ${i+1} of ${p.shots.length}`;
+  $('eyebrow').textContent=p.name+' assignment';$('title').textContent=shot.title;$('lesson').textContent=shot.lesson;
+  $('goals').innerHTML=shot.checks.map(c=>`<li>${c.label}</li>`).join('');
+  $('badge').textContent=shot.tripod?'On a tripod':'Hand-held';
+  $('dA').value=st.a;$('dT').value=st.t;$('dI').value=st.i;
+  sync();cancelAnimationFrame(raf);last=0;raf=requestAnimationFrame(loop);
+  window.scrollTo(0,0);
+}
+function sync(){
+  const a='f/'+AP[st.a],t=shL(SH[st.t]),i=String(ISO[st.i]);
+  $('rA').textContent=$('oA').textContent=a;$('rT').textContent=$('oT').textContent=t;$('rI').textContent=$('oI').textContent=i;
+  const s=stopsOf(cur.shot,st),cl=Math.max(-3,Math.min(3,s));
+  $('needle').style.left=((cl+3)/6*100)+'%';
+  const m=$('mtext'),ok=Math.abs(s)<=.75;
+  m.className='mtext '+(ok?'ok':'off');
+  m.textContent=ok?'Exposure looks right':(s>0?'Too bright':'Too dark')+' by '+(Math.abs(s)>9?'a lot':Math.abs(s).toFixed(1)+' stops');
+}
+function loop(ts){
+  if(frozen||$('shoot').hidden)return;
+  const dt=last?Math.min(.05,(ts-last)/1000):0;last=ts;st.time+=dt;
+  render(ctx,cur.shot,st,false);raf=requestAnimationFrame(loop);
+}
+[['dA','a'],['dT','t'],['dI','i']].forEach(([id,k])=>$(id).addEventListener('input',e=>{st[k]=+e.target.value;sync()}));
+$('gridOn').addEventListener('change',e=>$('grid').hidden=!e.target.checked);
+
+/* reframing */
+const vf=$('vf');let drag=null;
+const pan=(dx,dy)=>{st.panX=Math.max(0,Math.min(WW-VW,st.panX+dx));st.panY=Math.max(0,Math.min(WH-VH,st.panY+dy));$('hint').style.opacity=0};
+vf.addEventListener('pointerdown',e=>{if(frozen)return;drag={x:e.clientX,y:e.clientY};vf.setPointerCapture(e.pointerId)});
+vf.addEventListener('pointermove',e=>{if(!drag||frozen)return;const k=VW/vf.getBoundingClientRect().width;pan(-(e.clientX-drag.x)*k,-(e.clientY-drag.y)*k);drag={x:e.clientX,y:e.clientY}});
+['pointerup','pointercancel'].forEach(n=>vf.addEventListener(n,()=>drag=null));
+vf.addEventListener('keydown',e=>{if(frozen)return;const d={ArrowLeft:[-14,0],ArrowRight:[14,0],ArrowUp:[0,-14],ArrowDown:[0,14]}[e.key];if(d){e.preventDefault();pan(d[0],d[1])}});
+
+/* shutter */
+let ac=null;
+function clack(){try{const AC=window.AudioContext||window.webkitAudioContext;ac=ac||new AC();const n=ac.sampleRate*.06|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3);const s=ac.createBufferSource(),g=ac.createGain();g.gain.value=.25;s.buffer=b;s.connect(g);g.connect(ac.destination);s.start()}catch(e){}}
+function judge(shot,st){
+  const sc=SCENES[shot.scene],p=sc.subject?sc.subject({time:st.time}):null;
+  const c={N:AP[st.a],t:SH[st.t],iso:ISO[st.i],stops:stopsOf(shot,st),fx:p?(p.x-st.panX)/VW:0,fy:p?(p.y-st.panY)/VH:0,hy:sc.horizon!=null?(sc.horizon-st.panY)/VH:0};
+  return shot.checks.map(k=>{const ok=!!k.test(c);return{label:k.label,ok,tip:ok?k.ok:(typeof k.no==='function'?k.no(c):k.no)}});
+}
+$('fire').addEventListener('click',()=>{
+  if(frozen)return;frozen=true;cancelAnimationFrame(raf);clack();
+  const fl=$('flash');fl.classList.remove('go');void fl.offsetWidth;fl.classList.add('go');
+  render(ctx,cur.shot,st,true);
+  const res=judge(cur.shot,st),fails=res.filter(r=>!r.ok).length,stars=fails===0?3:fails===1?2:1;
+  if(stars>=(best[cur.shot.id]||0)){try{const tc=document.createElement('canvas');tc.width=300;tc.height=200;tc.getContext('2d').drawImage(view,0,0,300,200);
+    album[cur.shot.id]=tc.toDataURL('image/jpeg',.75);localStorage.setItem('working-camera-album',JSON.stringify(album))}catch(e){}}
+  best[cur.shot.id]=Math.max(best[cur.shot.id]||0,stars);save();
+  const more=cur.i+1<cur.p.shots.length,unlocked=best[cur.shot.id]>=2;
+  $('vf').classList.add('frozen');$('hint').style.opacity=0;$('controls').hidden=true;
+  const box=$('result');box.hidden=false;
+  box.innerHTML=`<div class="big" aria-label="${stars} of 3 stars">${starHTML(stars)}</div>
+    <div class="coach"><svg class="logo" aria-hidden="true"><use href="#snap"/></svg><h3>${['','Keep experimenting.','Close. One thing to fix.','That is the shot.'][stars]}</h3></div>
+    <ul class="rows">${res.map(r=>`<li class="${r.ok?'y':'n'}"><span class="mark">${r.ok?'✓':'✕'}</span><div><strong>${r.label}</strong><span class="tip">${r.tip}</span></div></li>`).join('')}</ul>
+    <p class="used">Shot at f/${AP[st.a]} · ${shL(SH[st.t])} · ISO ${ISO[st.i]}</p>
+    <div class="btns"><button class="btn${stars<3?' primary':''}" id="again">Try again</button><button class="btn${stars===3?' primary':''}" id="nextB"${more&&!unlocked?' disabled':''}>${more?(unlocked?'Next shot':'Next shot needs 2 stars'):'All paths'}</button></div>`;
+  $('again').onclick=()=>{frozen=false;box.hidden=true;$('controls').hidden=false;$('vf').classList.remove('frozen');last=0;raf=requestAnimationFrame(loop)};
+  $('nextB').onclick=()=>more?open(cur.p,cur.i+1):home();
+  $('total').textContent='★ '+PATHS.reduce((s,p)=>s+p.shots.reduce((q,x)=>q+(best[x.id]||0),0),0)+' / 36';
+});
+
+function home(){cancelAnimationFrame(raf);$('shoot').hidden=true;$('home').hidden=false;drawHome();window.scrollTo(0,0)}
+$('back').onclick=home;$('homeBtn').onclick=home;
+drawHome();
+})();
+</script>
